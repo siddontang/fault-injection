@@ -3,13 +3,15 @@
 /*
  * io_error.stp Inject IO error to the process
  * 
- * stap io_error.stp -g -x pid [<r|w|rw>] [percent]
+ * stap io_error.stp -g -x pid [<r|w|rw>] [percent] [proc_name]
  * [<r|w|rw>] means to inject delay for read, write or read and write, default "rw".
  * [percent] is the injection probability, must be in [0, 100], default 1.
+ * [proc_name] is the process name to be injected, if set, target pid will be ignored.
  */
 
 global type = "rw"
 global percent = 1
+global proc_name = ""
 
 
 // include the common errors for the read and write.
@@ -46,12 +48,32 @@ probe begin
         type = @1
         percent = $2
     %)
+
+    %( $# == 3 %?
+        type = @1
+        percent = $2
+        proc_name = @3
+    %)
 }
 
 
+function is_target_skipped() {
+    if (proc_name != "") {
+        if (proc_name != pid2execname(pid())) {
+            return 1
+        } 
+    } else {
+        if (target() != pid()) {
+            return 1
+        }
+    }
+
+    return 0
+}
+
 probe vfs.read.return
 {
-    if (target() != pid()) next
+    if (is_target_skipped() == 1) next
     
     // already error, return
     if ($return < 0) next
@@ -65,7 +87,7 @@ probe vfs.read.return
 
 probe vfs.write.return
 {
-    if (target() != pid()) next
+    if (is_target_skipped() == 1) next
 
     // already error, return
     if ($return < 0) next
