@@ -1,0 +1,79 @@
+#! /usr/bin/env stap
+
+/*
+ * io_error.stp Inject IO error to the process
+ * 
+ * stap io_error.stp -g -x pid [<r|w|rw>] [percent]
+ * [<r|w|rw>] means to inject delay for read, write or read and write, default "rw".
+ * [percent] is the injection probability, must be in [0, 100], default 1.
+ */
+
+global type = "rw"
+global percent = 1
+
+
+// include the common errors for the read and write.
+global write_error_codes
+global read_error_codes
+
+function init_errors() 
+{
+    write_error_codes[0] = 1   // EPERM
+    write_error_codes[1] = 4   // EINTR
+    write_error_codes[2] = 5   // EIO
+    write_error_codes[3] = 9   // EBADF
+    write_error_codes[4] = 22  // EINVAL
+    write_error_codes[5] = 27  // EFBIG
+    write_error_codes[6] = 28  // ENOSPC
+    write_error_codes[7] = 122 // EDQUOT
+
+    read_error_codes[0] = 4   // EINTR
+    read_error_codes[1] = 5   // EIO
+    read_error_codes[2] = 9   // EBADF
+    read_error_codes[3] = 22  // EINVAL
+}
+
+probe begin
+{
+    printf("begin to inject error to IO\n");
+    init_errors();
+
+    %( $# == 1 %?
+        type = @1
+    %)
+
+    %( $# == 2 %?
+        type = @1
+        percent = $2
+    %)
+}
+
+
+probe vfs.read.return
+{
+    if (target() != pid()) next
+    
+    // already error, return
+    if ($return < 0) next
+
+    if (type != "r" && type != "rw") next
+    	
+    if (randint(100) >= percent) next
+
+    $return = -read_error_codes[randint(4)]
+}
+
+probe vfs.write.return
+{
+    if (target() != pid()) next
+
+    // already error, return
+    if ($return < 0) next
+
+    if (type != "w" && type != "rw") next
+
+    if (randint(100) >= percent) next
+
+    $return = -write_error_codes[randint(8)]
+}
+

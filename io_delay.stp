@@ -1,0 +1,61 @@
+#! /usr/bin/env stap
+
+/*
+ * io_delay.stp Inject IO delay to the process
+ * 
+ * stap io_delay.stp -DMAXSKIPPED=9999 -g -x pid [<r|w|rw>] <delay_us|min_delay_us max_delay_us>
+ * <r|w|rw> means to inject delay for read, write or read and write, default "rw".
+ * delay_us is the delay time, default 300 microseconds.
+ * min_delay_us and max_delay_us is the range delay time in [min_delay_us, max_delay_us).
+ */
+
+global type = "rw"
+global start_us = 300
+global count = 0
+
+probe begin
+{
+    printf("begin to delay IO\n");
+
+    %( $# == 1 %?
+    	type = @1
+    %)
+
+    %( $# == 2 %?
+    	type = @1
+    	start_us = $2
+    %)
+
+    %( $# == 3 %?
+    	type = @1
+    	start_us = $2
+    	count = $3 - $2
+    %)
+}
+
+function delay() {
+	udelay(randint(count) + start_us)
+}
+
+probe vfs.read.return
+{
+    if (target() != pid()) next
+    
+    if ($return < 0) next
+
+    if (type != "r" && type != "rw") next
+
+    delay()
+}
+
+probe vfs.write.return
+{
+    if (target() != pid()) next
+
+    if ($return < 0) next
+
+    if (type != "w" && type != "rw") next
+
+    delay()
+}
+
