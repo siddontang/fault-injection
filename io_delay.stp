@@ -3,34 +3,31 @@
 /*
  * io_delay.stp Inject IO delay to the process
  * 
- * stap io_delay.stp -DMAXSKIPPED=9999 -g -x pid [<r|w|rw>] <delay_us|min_delay_us max_delay_us>
- * <r|w|rw> means to inject delay for read, write or read and write, default "rw".
- * delay_us is the delay time, default 300 microseconds.
- * min_delay_us and max_delay_us is the range delay time in [min_delay_us, max_delay_us).
+ * stap io_delay.stp -I ./lib -DMAXSKIPPED=9999 -g -x pid type=3 delay_us=300
  */
 
-global type = "rw"
+global read_type = 1
+global write_type = 2
+global type = 3
 global start_us = 300
 global count = 0
 
 probe begin
 {
-    printf("begin to delay IO\n");
+    fij_logger(0, "begin to delay IO");
 
-    %( $# == 1 %?
-    	type = @1
-    %)
+    fij_add_option("type", 3, "IO type to inject, read: 1, write: 2, (default: 3)") 
+    fij_add_option("delay_us", 300, "Delay time(us), (default 300)")
+    fij_add_option("max_delay_us", 0, "Max delay time, if set, a random value in [delay_us, max_delay_us) will be chosen, (default 0)")   
+}
 
-    %( $# == 2 %?
-    	type = @1
-    	start_us = $2
-    %)
-
-    %( $# == 3 %?
-    	type = @1
-    	start_us = $2
-    	count = $3 - $2
-    %)
+probe begin(2000) 
+{
+    type = fij_params["type"]
+    start_us = fij_params["delay_us"]
+    if (fij_params["max_delay_us"] > start_us) {
+        count = fij_params["max_delay_us"] - start_us
+    }   
 }
 
 function delay() {
@@ -39,23 +36,25 @@ function delay() {
 
 probe vfs.read.return
 {
-    if (target() != pid()) next
-    
     if ($return < 0) next
 
-    if (type != "r" && type != "rw") next
+    if ((type & read_type == 0)) next
 
-    delay()
+    if (fij_should_fail()) {
+        delay()   
+        fij_done_fail() 
+    }
 }
 
 probe vfs.write.return
 {
-    if (target() != pid()) next
-
     if ($return < 0) next
 
-    if (type != "w" && type != "rw") next
+    if ((type & write_type == 0)) next
 
-    delay()
+    if (fij_should_fail()) {
+        delay()   
+        fij_done_fail() 
+    }
 }
 
